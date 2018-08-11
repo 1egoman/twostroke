@@ -1,0 +1,13 @@
+{
+  "name": "twostroke",
+  "version": "1.0.1",
+  "description": "",
+  "main": "src/index.js",
+  "keywords": [],
+  "author": "Ryan Gaus <rsg1egoman@gmail.com>",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {
+    "chalk": "^2.4.1"
+  }
+}

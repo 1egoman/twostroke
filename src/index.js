@@ -182,25 +182,32 @@ function pushHistoryState(state, text) {
   delete stateCopyWithoutSomeFields.historyIndex;
   delete stateCopyWithoutSomeFields.insertAppend;
 
-  // Don't push a history state if the new state is the same as the previous.
+  // Don't push a history state if the new text+state is the same as the previous.
   if (
     state.history.length > 0 &&
+    state.history[state.history.length-1].text === text &&
     JSON.stringify(state.history[state.history.length-1].state) ===
     JSON.stringify(stateCopyWithoutSomeFields)
   ) {
     return false;
   }
 
-  // Remove history states after the current one, since they've now "diverged"
-  // Vim doesn't actually do this but that's a task for another day.
-  state.history = state.history.slice(0, state.historyIndex);
+  if (state.historyIndex !== null) {
+    // Remove history states after the current one, since they've now "diverged"
+    // Vim doesn't actually do this but that's a task for another day.
+    state.history = state.history.slice(0, state.historyIndex+1);
+  }
 
   state.history.push({
     text,
     state: stateCopyWithoutSomeFields,
   });
 
-  state.historyIndex += 1;
+  if (state.historyIndex == null) {
+    state.historyIndex = 0; // Initial set
+  } else {
+    state.historyIndex += 1;
+  }
   return true;
 }
 
@@ -216,7 +223,7 @@ module.exports = function twostroke(text, state, commands) {
       marks: {},
 
       history: [],
-      historyIndex: 0,
+      historyIndex: null,
     };
     pushHistoryState(state, text);
   }
@@ -815,6 +822,7 @@ module.exports = function twostroke(text, state, commands) {
             const resp = applyEditingOperation(text, state, startIndex, endIndex);
             state = resp.state;
             text = resp.text;
+            pushHistoryState(state, text);
           }
 
           delete state.operation;
@@ -1228,28 +1236,24 @@ module.exports = function twostroke(text, state, commands) {
       }
 
       case command === 'u' || command === 'ctrl-r': {
-        // If at the end of the history states list, then push a new one representing the current
-        // state.
-        if (state.historyIndex >= state.history.length-1) {
-          const newHistoryStateAdded = pushHistoryState(state, text);
-          if (newHistoryStateAdded) {
-            state.historyIndex -= 1;
+        for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
+          // Adjust the history index depending on the command
+          if (command === 'u') { state.historyIndex -= 1; }
+          if (command === 'ctrl-r') { state.historyIndex += 1; }
+
+          // Ensure history index remains within bounds
+          if (state.historyIndex < 0) { state.historyIndex = 0; }
+          if (state.historyIndex > state.history.length-1) {
+            state.historyIndex = state.history.length - 1;
           }
         }
 
-        // Adjust the history index depending on the command
-        if (command === 'u') { state.historyIndex -= 1; }
-        if (command === 'ctrl-r') { state.historyIndex += 1; }
-
-        // Ensure history index remains within bounds
-        if (state.historyIndex < 0) { state.historyIndex = 0; }
-        if (state.historyIndex > state.history.length-1) {
-          state.historyIndex = state.history.length - 1;
-        }
-
-        // Assign the state dependingon the selected history state
+        // Assign the state depending on the selected history state
         Object.assign(state, state.history[state.historyIndex].state);
         text = state.history[state.historyIndex].text;
+
+        delete state.operationIterations;
+        break;
       }
 
       // Repeat a movement more than once

@@ -488,11 +488,26 @@ module.exports = function twostroke(text, state, commands) {
       }
 
       // When in search mode, add to the search buffer.
-      case state.mode === 'search' && command.charCodeAt(0) !== 13: {
+      case state.mode === 'search': {
         if (command === 'backspace') {
           if (state.searchCursorIndex > 0) {
             state.searchQuery = `${state.searchQuery.slice(0, state.searchCursorIndex-1)}${state.searchQuery.slice(state.searchCursorIndex)}`;
             state.searchCursorIndex -= 1;
+          }
+
+        // When leaving search mode, perform the first search.
+        } else if (command === 'enter') {
+          delete state.searchCursorIndex;
+          state.mode = 'normal';
+
+          if (state.searchQuery.length === 0) {
+            // Not typing anything after pressing / should act like the user pressed `n`.
+            state.searchQuery = new RegExp(state.registers['/']);
+          } else {
+            // The user typed a new search query
+            state.registers['/'] = state.searchQuery;
+            state.searchQuery = new RegExp(state.searchQuery);
+            state.initialSearch = true;
           }
 
         } else if (text.length-1 < state.searchCursorIndex) {
@@ -504,21 +519,6 @@ module.exports = function twostroke(text, state, commands) {
         }
         break;
       }
-
-      // When leaving search mode, perform the first search.
-      case state.mode === 'search' && command.charCodeAt(0) === 13:
-        delete state.searchCursorIndex;
-        state.mode = 'normal';
-
-        if (state.searchQuery.length === 0) {
-          // Not typing anything after pressing / should act like the user pressed `n`.
-          state.searchQuery = new RegExp(state.registers['/']);
-        } else {
-          // The user typed a new search query
-          state.registers['/'] = state.searchQuery;
-          state.searchQuery = new RegExp(state.searchQuery);
-          state.initialSearch = true;
-        }
 
       case state.initialSearch || command === 'n': {
         if (!state.searchQuery) { break; }
@@ -1210,6 +1210,19 @@ module.exports = function twostroke(text, state, commands) {
           delete state.operation;
           pushHistoryState(state, text);
         }
+        break;
+      }
+
+      case command === 'J': {
+        // Cannot use J on last row
+        if (state.row === text.split('\n').length-1) {
+          break;
+        }
+        for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
+          const finalIndex = getIndexOfEndOfRow(text, state.row);
+          text = text.slice(0, finalIndex) + ' ' + text.slice(finalIndex+1).replace(/^\s+/, '');
+        }
+        pushHistoryState(state, text);
         break;
       }
 

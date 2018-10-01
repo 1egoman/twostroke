@@ -181,6 +181,8 @@ function pushHistoryState(state, text) {
   delete stateCopyWithoutSomeFields.history;
   delete stateCopyWithoutSomeFields.historyIndex;
   delete stateCopyWithoutSomeFields.insertAppend;
+  delete stateCopyWithoutSomeFields.visualStartIndex;
+  delete stateCopyWithoutSomeFields.visualEndIndex;
 
   // Don't push a history state if the new text+state is the same as the previous.
   if (
@@ -249,6 +251,8 @@ module.exports = function twostroke(text, state, commands) {
         delete state.operation;
         delete state.register;
         delete state.insertFromChange;
+
+        pushHistoryState(state, text);
         break;
 
       // When in insert mode, add at the current cursor position.
@@ -286,6 +290,8 @@ module.exports = function twostroke(text, state, commands) {
         state.registers['.'] = text;
         break;
 
+      // Handle undo and redo. This is up here since pressing 'u' / 'ctrl-r' shouldn't be trapped by
+        // all the handlers below.
       case command === 'u' || command === 'ctrl-r': {
         for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
           // Adjust the history index depending on the command
@@ -831,6 +837,7 @@ module.exports = function twostroke(text, state, commands) {
           }
 
           delete state.operation;
+          pushHistoryState(state, text);
           break;
         } else {
           state.operation = 'change';
@@ -853,6 +860,7 @@ module.exports = function twostroke(text, state, commands) {
           }
 
           delete state.operation;
+          pushHistoryState(state, text);
           break;
         } else {
           state.operation = 'delete';
@@ -912,7 +920,12 @@ module.exports = function twostroke(text, state, commands) {
         break;
 
       case command === 'p':
-        pushHistoryState(state, text);
+        if (typeof state.registers[state.register || '"'] === 'undefined') {
+          // Nothing to paste!
+          break;
+        }
+
+        // Paste as many times as desired.
         for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
           text = text.slice(
             0, getIndexFromRowCol(text, state.row, state.col)
@@ -920,11 +933,10 @@ module.exports = function twostroke(text, state, commands) {
         }
 
         delete state.operationIterations;
+        pushHistoryState(state, text);
         break;
 
       case command === 'o': {
-        pushHistoryState(state, text);
-
         // Figure out how many whitespace characters are at the start of the current row
         let startWhitespaceIndex = getIndexOfStartOfRow(text, state.row),
             endWhitespaceIndex = startWhitespaceIndex;
@@ -943,6 +955,7 @@ module.exports = function twostroke(text, state, commands) {
         state.mode = 'insert';
         state.insertAppend = true;
         state.registers["."] = '';
+        pushHistoryState(state, text);
         break;
       }
       case command === 'O': {
@@ -963,6 +976,7 @@ module.exports = function twostroke(text, state, commands) {
         state.mode = 'insert';
         state.insertAppend = true;
         state.registers["."] = '';
+        pushHistoryState(state, text);
         break;
       }
 
@@ -1013,10 +1027,15 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
-        delete state.operation;
         delete state.last;
         delete state.operationIterations;
         delete state.modifier; // "inside" or "around" or undefined
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
@@ -1049,10 +1068,15 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
-        delete state.operation;
         delete state.last;
         delete state.operationIterations;
         delete state.modifier; // "inside" or "around" or undefined
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
@@ -1080,10 +1104,15 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
-        delete state.operation;
         delete state.last;
         delete state.operationIterations;
         delete state.modifier; // "inside" or "around" or undefined
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
@@ -1131,9 +1160,14 @@ module.exports = function twostroke(text, state, commands) {
           }
         }
 
-        delete state.operation;
         delete state.operationIterations;
         delete state.modifier; // "inside" or "around" or undefined
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
       case command === 'h' || command === 'l': {
@@ -1167,10 +1201,15 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
-        delete state.operation;
         delete state.last;
         delete state.operationIterations;
         delete state.modifier; // "inside" or "around" or undefined
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
@@ -1191,7 +1230,6 @@ module.exports = function twostroke(text, state, commands) {
         break;
 
       case command === 'A':
-        pushHistoryState(state, text);
         state.mode = 'insert';
         state.insertAppend = true;
       case command === 'C':
@@ -1217,7 +1255,11 @@ module.exports = function twostroke(text, state, commands) {
         state = resp.state;
         text = resp.text;
 
-        delete state.operation;
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
       
@@ -1236,11 +1278,16 @@ module.exports = function twostroke(text, state, commands) {
 
         // Reset position after operation
         state.col = 0;
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
       case command === 'I':
-        pushHistoryState(state, text);
         state.mode = 'insert';
         state.insertAppend = true;
       case command === '^': {
@@ -1259,6 +1306,12 @@ module.exports = function twostroke(text, state, commands) {
         );
         state = resp.state;
         text = resp.text;
+
+        // Only log operation if it's not just a movement
+        if (state.operation === 'delete') {
+          delete state.operation;
+          pushHistoryState(state, text);
+        }
         break;
       }
 
@@ -1317,6 +1370,7 @@ module.exports = function twostroke(text, state, commands) {
         }
 
         delete state.operationIterations;
+        pushHistoryState(state, text);
         break;
 
       case command === ':':

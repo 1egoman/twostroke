@@ -251,6 +251,62 @@ module.exports = function twostroke(text, state, commands) {
         delete state.insertFromChange;
         break;
 
+      // When in insert mode, add at the current cursor position.
+      case state.mode === 'insert':
+        const index = getIndexFromRowCol(text, state.row, state.col);
+
+        if (command === 'backspace') {
+          if (index > 0) {
+            text = `${text.slice(0, index-1)}${text.slice(index)}`;
+            state.col -= 1;
+          }
+
+        } else if (command.charCodeAt(0) === 13 || command === 'enter') {
+          let endWhitespaceIndex = getIndexOfStartOfRow(text, state.row), whitespaceMatch, colIndex = 0;
+
+          // Figure out how many whitespace characters are at the start of the current row
+          let whitespace = '';
+          while (whitespaceMatch = /^(\s)$/.exec(text[endWhitespaceIndex])) {
+            endWhitespaceIndex += 1;
+            whitespace += whitespaceMatch[1];
+            colIndex += 1;
+          }
+          text = `${text.slice(0, index)}\n${whitespace}${text.slice(index)}`;
+          state.col = colIndex;
+          state.row += 1;
+
+        } else if (text.length-1 < index) {
+          text += command;
+          state.col += 1;
+        } else {
+          text = `${text.slice(0, index)}${command}${text.slice(index)}`;
+          state.col += 1;
+        }
+
+        state.registers['.'] = text;
+        break;
+
+      case command === 'u' || command === 'ctrl-r': {
+        for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
+          // Adjust the history index depending on the command
+          if (command === 'u') { state.historyIndex -= 1; }
+          if (command === 'ctrl-r') { state.historyIndex += 1; }
+
+          // Ensure history index remains within bounds
+          if (state.historyIndex < 0) { state.historyIndex = 0; }
+          if (state.historyIndex > state.history.length-1) {
+            state.historyIndex = state.history.length - 1;
+          }
+        }
+
+        // Assign the state depending on the selected history state
+        Object.assign(state, state.history[state.historyIndex].state);
+        text = state.history[state.historyIndex].text;
+
+        delete state.operationIterations;
+        break;
+      }
+
       // The second half of typing " (register name) to set the given register as current
       case state.last === 'set-register':
         state.register = command;
@@ -302,6 +358,8 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
+        pushHistoryState(state, text);
+
         delete state.operation;
         delete state.last;
         delete state.operationIterations;
@@ -339,6 +397,8 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
 
+        pushHistoryState(state, text);
+
         delete state.operation;
         delete state.last;
         delete state.operationIterations;
@@ -348,10 +408,11 @@ module.exports = function twostroke(text, state, commands) {
 
       // The second part of typing r (char) to replace a character with another character
       case state.last === 'replace-char': {
-        pushHistoryState(state, text);
         const index = getIndexFromRowCol(text, state.row, state.col);
         text = text.slice(0, index) + command + text.slice(index+1);
         delete state.last;
+
+        pushHistoryState(state, text);
         break;
       }
 
@@ -390,52 +451,26 @@ module.exports = function twostroke(text, state, commands) {
           text = resp.text;
         }
         delete state.operationIterations;
+
+        pushHistoryState(state, text);
         break;
       }
 
-      // When in insert mode, add at the current cursor position.
-      case state.mode === 'insert':
-        const index = getIndexFromRowCol(text, state.row, state.col);
-
-        if (command === 'backspace') {
-          if (index > 0) {
-            text = `${text.slice(0, index-1)}${text.slice(index)}`;
-            state.col -= 1;
-          }
-
-        } else if (command.charCodeAt(0) === 13 || command === 'enter') {
-          let endWhitespaceIndex = getIndexOfStartOfRow(text, state.row), whitespaceMatch, colIndex = 0;
-
-          // Figure out how many whitespace characters are at the start of the current row
-          let whitespace = '';
-          while (whitespaceMatch = /^(\s)$/.exec(text[endWhitespaceIndex])) {
-            endWhitespaceIndex += 1;
-            whitespace += whitespaceMatch[1];
-            colIndex += 1;
-          }
-          text = `${text.slice(0, index)}\n${whitespace}${text.slice(index)}`;
-          state.col = colIndex;
-          state.row += 1;
-
-        } else if (text.length-1 < index) {
-          text += command;
-          state.col += 1;
-        } else {
-          text = `${text.slice(0, index)}${command}${text.slice(index)}`;
-          state.col += 1;
-        }
-
-        state.registers['.'] = text;
-        break;
-
       // When in command mode, add to the command buffer.
-      case state.mode === 'command' && command.charCodeAt(0) !== 13: {
+      case state.mode === 'command': {
         if (command === 'backspace') {
           if (state.commandCursorIndex > 0) {
             state.commandQuery = `${state.commandQuery.slice(0, state.commandCursorIndex-1)}${state.commandQuery.slice(state.commandCursorIndex)}`;
             state.commandCursorIndex -= 1;
           }
 
+        } else if (command === 'enter') {
+          delete state.commandCursorIndex;
+          state.mode = 'normal';
+
+          console.log('COMMAND ISSUED!', state.commandQuery);
+          delete state.commandQuery;
+          break;
         } else if (text.length-1 < state.commandCursorIndex) {
           state.commandQuery += command;
           state.commandCursorIndex += 1;
@@ -443,14 +478,6 @@ module.exports = function twostroke(text, state, commands) {
           state.commandQuery = `${state.commandQuery.slice(0, state.commandCursorIndex)}${command}${state.commandQuery.slice(state.commandCursorIndex)}`;
           state.commandCursorIndex += 1;
         }
-        break;
-      }
-      case state.mode === 'command' && command.charCodeAt(0) === 13: {
-        delete state.commandCursorIndex;
-        state.mode = 'normal';
-
-        console.log('COMMAND ISSUED!', state.commandQuery);
-        delete state.commandQuery;
         break;
       }
 
@@ -1232,27 +1259,6 @@ module.exports = function twostroke(text, state, commands) {
         );
         state = resp.state;
         text = resp.text;
-        break;
-      }
-
-      case command === 'u' || command === 'ctrl-r': {
-        for (let iteration = 0; iteration < (state.operationIterations || 1); iteration++) {
-          // Adjust the history index depending on the command
-          if (command === 'u') { state.historyIndex -= 1; }
-          if (command === 'ctrl-r') { state.historyIndex += 1; }
-
-          // Ensure history index remains within bounds
-          if (state.historyIndex < 0) { state.historyIndex = 0; }
-          if (state.historyIndex > state.history.length-1) {
-            state.historyIndex = state.history.length - 1;
-          }
-        }
-
-        // Assign the state depending on the selected history state
-        Object.assign(state, state.history[state.historyIndex].state);
-        text = state.history[state.historyIndex].text;
-
-        delete state.operationIterations;
         break;
       }
 
